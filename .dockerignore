@@ -1,0 +1,10 @@
+.git
+.github
+.claude
+.venv
+.nox
+**/__pycache__
+**/*.py[cod]
+tests
+grapevine/tests
+infra

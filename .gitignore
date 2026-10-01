@@ -67,3 +67,5 @@ pylintrc
 pylintrc.test
 
 .agents/skills
+# Claude Code worktrees
+.claude/
