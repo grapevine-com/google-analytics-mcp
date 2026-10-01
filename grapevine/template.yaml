@@ -121,7 +121,9 @@ Resources:
     Condition: HasInvokers
     Properties:
       Path: /grapevine-ga-mcp/
-      RoleName: gvc-agent-ga-invoker
+      # Must start with grapevine-ga-mcp: the deploy role only manages roles
+      # with that prefix.
+      RoleName: grapevine-ga-mcp-invoker
       Description: Lets named cross-account roles call the GA MCP runtime and nothing else.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
