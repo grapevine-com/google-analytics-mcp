@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Grapevine Google Analytics MCP server on Bedrock AgentCore Runtime: MCP
+  protocol, PUBLIC network mode, IAM (SigV4) inbound auth.
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: grapevine-ga-mcp image URI (from the ECR stack), pinned by tag.
+  GoogleWifAudience:
+    Type: String
+    Default: ""
+    Description: >
+      Workload Identity Federation provider audience, e.g.
+      //iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>.
+      Set with GoogleServiceAccountEmail for keyless Google auth.
+  GoogleServiceAccountEmail:
+    Type: String
+    Default: ""
+    Description: Service account the runtime impersonates (has Viewer on the GA4 property).
+  GoogleCredentialsSecretArn:
+    Type: String
+    Default: ""
+    Description: >
+      Fallback when WIF isn't available: a Secrets Manager secret holding a
+      service account JSON key. Leave blank when using WIF.
+  InvokerPrincipalArns:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: >
+      Cross-account IAM role ARNs (e.g. gvc-agent's runtime roles in the
+      Bizantic account) allowed to assume the invoker role. Blank creates no
+      invoker role.
+
+Conditions:
+  HasSecret: !Not [!Equals [!Ref GoogleCredentialsSecretArn, ""]]
+  HasInvokers: !Not [!Equals [!Join ["", !Ref InvokerPrincipalArns], ""]]
+
+Resources:
+  RuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # The deploy role may only create and pass roles under this path.
+      Path: /grapevine-ga-mcp/
+      RoleName: grapevine-ga-mcp-runtime
+      Description: Execution role the AgentCore Runtime assumes to run the GA MCP server.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: bedrock-agentcore.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "aws:SourceAccount": !Ref AWS::AccountId }
+      Policies:
+        - PolicyName: runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcrAuth
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: EcrPull
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchCheckLayerAvailability
+                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/grapevine-ga-mcp
+              # No CMK on the log group: a KMS key here costs a request per
+              # write and burns the free tier.
+              - Sid: Telemetry
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+              - !If
+                - HasSecret
+                - Sid: GoogleKeySecret
+                  Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref GoogleCredentialsSecretArn
+                - !Ref AWS::NoValue
+
+  Runtime:
+    Type: AWS::BedrockAgentCore::Runtime
+    Properties:
+      # Runtime names allow letters, digits and underscores only.
+      AgentRuntimeName: grapevine_ga_mcp
+      Description: Google Analytics MCP server (fork of googleanalytics/google-analytics-mcp)
+      AgentRuntimeArtifact:
+        ContainerConfiguration:
+          ContainerUri: !Ref ImageUri
+      RoleArn: !GetAtt RuntimeRole.Arn
+      # PUBLIC on purpose: the server only calls Google's public APIs, and a
+      # VPC attachment can never be removed from an AgentCore runtime.
+      NetworkConfiguration:
+        NetworkMode: PUBLIC
+      ProtocolConfiguration: MCP
+      # No AuthorizerConfiguration: callers authenticate with SigV4 and need
+      # bedrock-agentcore:InvokeAgentRuntime on this runtime.
+      EnvironmentVariables:
+        GOOGLE_WIF_AUDIENCE: !Ref GoogleWifAudience
+        GOOGLE_SERVICE_ACCOUNT_EMAIL: !Ref GoogleServiceAccountEmail
+        GOOGLE_CREDENTIALS_SECRET_ARN: !Ref GoogleCredentialsSecretArn
+
+  # Assumed cross-account by gvc-agent while it still lives in the Bizantic
+  # account.
+  # Once gvc-agent runs in this account, grant its runtime role
+  # InvokeAgentRuntime directly and drop this.
+  InvokerRole:
+    Type: AWS::IAM::Role
+    Condition: HasInvokers
+    Properties:
+      Path: /grapevine-ga-mcp/
+      RoleName: gvc-agent-ga-invoker
+      Description: Lets named cross-account roles call the GA MCP runtime and nothing else.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Ref InvokerPrincipalArns }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-ga-mcp
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock-agentcore:InvokeAgentRuntime
+                Resource:
+                  - !GetAtt Runtime.AgentRuntimeArn
+                  - !Sub ${Runtime.AgentRuntimeArn}/*
+
+Outputs:
+  AgentRuntimeArn:
+    Description: >
+      Runtime ARN. Invocations URL = https://bedrock-agentcore.<region>.amazonaws.com/
+      runtimes/<url-encoded-arn>/invocations?qualifier=DEFAULT
+    Value: !GetAtt Runtime.AgentRuntimeArn
+  InvokerRoleArn:
+    Condition: HasInvokers
+    Value: !GetAtt InvokerRole.Arn

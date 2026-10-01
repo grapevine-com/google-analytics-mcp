@@ -1,0 +1,32 @@
+# Grapevine additions only: unit tests for grapevine/, template lint, and an
+# image build. Upstream's presubmit.yaml still covers analytics_mcp/.
+permissions:
+  contents: read
+name: Grapevine CI
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      with:
+        python-version: "3.13"
+        cache: 'pip'
+    - name: Install
+      run: pip install . -r grapevine/requirements.txt cfn-lint
+    - name: Unit tests
+      run: python -m unittest discover -s grapevine/tests -t . -p 'test_*.py'
+    - name: Lint templates
+      run: cfn-lint grapevine/template.yaml grapevine/ecr.yaml infra/bootstrap.yaml
+    - name: Build image
+      run: docker build -f grapevine/Dockerfile -t grapevine-ga-mcp:ci .

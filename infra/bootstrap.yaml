@@ -1,0 +1,317 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Bootstrap for the Grapevine AWS account: GitHub Actions OIDC federation and a
+  least-privilege deploy role for grapevine-com/google-analytics-mcp, an
+  account-wide CloudTrail, and a monthly cost budget alarm.
+
+  Deployed by hand as stack `grapevine-bootstrap` in us-east-1, assuming
+  OrganizationAccountAccessRole from the management account. Modeled on
+  gvc-agent's infra/github-oidc.yaml.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: grapevine-com
+    Description: GitHub org/owner whose repo may assume the deploy role.
+  GitHubRepo:
+    Type: String
+    Default: google-analytics-mcp
+    Description: Repository allowed to assume the deploy role.
+  ResourcePrefix:
+    Type: String
+    Default: grapevine-ga-mcp
+    Description: >
+      Prefix for the ECR repository, CloudFormation stacks and IAM role path
+      the deploy role may manage.
+  AgentCoreRuntimePrefix:
+    Type: String
+    Default: grapevine_ga_mcp
+    Description: >
+      AgentCore runtime names allow only [a-zA-Z][a-zA-Z0-9_]*, so the runtime
+      prefix uses underscores.
+  BudgetEmail:
+    Type: String
+    Description: >
+      Recipient of the budget notifications. No default: this repo is public.
+      On updates, pass ParameterKey=BudgetEmail,UsePreviousValue=true.
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 20
+    Description: Monthly cost budget in USD.
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # AWS validates GitHub's cert via its trusted CA list; thumbprints are
+      # still a required field.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  # ---------------------------------------------------------------------------
+  # Deploy role for the GA MCP stack. Wildcard resources are limited to APIs
+  # that authorize creation against "*" (a name-scoped ARN is an implicit deny
+  # at create time); everything else is scoped by name.
+  # ---------------------------------------------------------------------------
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: grapevine-ga-mcp-deploy
+      MaxSessionDuration: 3600
+      Description: google-analytics-mcp deployments from GitHub Actions.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+      Policies:
+        - PolicyName: grapevine-ga-mcp-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Stacks
+                Effect: Allow
+                Action: cloudformation:*
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ResourcePrefix}*/*
+              - Sid: CloudFormationReads
+                Effect: Allow
+                Action:
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ListStacks
+                Resource: "*"
+              # The auth token is account-wide by definition and carries no
+              # write capability on its own.
+              - Sid: EcrAuth
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: EcrRepo
+                Effect: Allow
+                Action:
+                  - ecr:CreateRepository
+                  - ecr:DeleteRepository
+                  - ecr:DescribeRepositories
+                  - ecr:PutLifecyclePolicy
+                  - ecr:GetLifecyclePolicy
+                  - ecr:DeleteLifecyclePolicy
+                  - ecr:PutImageScanningConfiguration
+                  - ecr:PutImageTagMutability
+                  - ecr:SetRepositoryPolicy
+                  - ecr:GetRepositoryPolicy
+                  - ecr:DeleteRepositoryPolicy
+                  - ecr:TagResource
+                  - ecr:UntagResource
+                  - ecr:ListTagsForResource
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ResourcePrefix}*
+              - Sid: ExecutionRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:TagRole
+                  - iam:UntagRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}/*
+              - Sid: PassExecutionRoleToAgentCore
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}/*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: bedrock-agentcore.amazonaws.com
+              # Create/List actions don't support resource-level scoping
+              # (see gvc-agent infra/github-oidc.yaml). CreateAgentRuntime
+              # implicitly creates the DEFAULT endpoint against runtime/*.
+              - Sid: AgentCoreUnscoped
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:CreateAgentRuntime
+                  - bedrock-agentcore:CreateAgentRuntimeEndpoint
+                  - bedrock-agentcore:CreateWorkloadIdentity
+                  - bedrock-agentcore:ListWorkloadIdentities
+                  - bedrock-agentcore:ListAgentRuntimes
+                  - bedrock-agentcore:ListAgentRuntimeVersions
+                  - bedrock-agentcore:ListAgentRuntimeEndpoints
+                Resource: "*"
+              - Sid: AgentCoreScoped
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetAgentRuntime
+                  - bedrock-agentcore:UpdateAgentRuntime
+                  - bedrock-agentcore:DeleteAgentRuntime
+                  - bedrock-agentcore:GetAgentRuntimeEndpoint
+                  - bedrock-agentcore:UpdateAgentRuntimeEndpoint
+                  - bedrock-agentcore:DeleteAgentRuntimeEndpoint
+                  - bedrock-agentcore:InvokeAgentRuntime
+                  - bedrock-agentcore:TagResource
+                  - bedrock-agentcore:UntagResource
+                  - bedrock-agentcore:ListTagsForResource
+                  - bedrock-agentcore:GetWorkloadIdentity
+                  - bedrock-agentcore:UpdateWorkloadIdentity
+                  - bedrock-agentcore:DeleteWorkloadIdentity
+                Resource:
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/${AgentCoreRuntimePrefix}*
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/*
+              # AgentCore writes to /aws/bedrock-agentcore/runtimes/<name>-*;
+              # the stack may pre-create it with a retention policy (no CMK).
+              - Sid: RuntimeLogGroups
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:PutRetentionPolicy
+                  - logs:DeleteRetentionPolicy
+                  - logs:TagResource
+                  - logs:UntagResource
+                  - logs:ListTagsForResource
+                  - logs:TagLogGroup
+                  - logs:FilterLogEvents
+                  - logs:GetLogEvents
+                  - logs:DescribeLogStreams
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*:*
+              - Sid: LogGroupDescribe
+                Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # Account-wide CloudTrail.
+  # ---------------------------------------------------------------------------
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub grapevine-cloudtrail-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt TrailBucket.Arn
+              - !Sub ${TrailBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: CloudTrailAclCheck
+            Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt TrailBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceArn: !Sub arn:aws:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/grapevine-trail
+          - Sid: CloudTrailWrite
+            Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: s3:PutObject
+            Resource: !Sub ${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceArn: !Sub arn:aws:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/grapevine-trail
+
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName: grapevine-trail
+      S3BucketName: !Ref TrailBucket
+      IsLogging: true
+      IsMultiRegionTrail: true
+      IncludeGlobalServiceEvents: true
+      EnableLogFileValidation: true
+
+  # ---------------------------------------------------------------------------
+  # Monthly cost budget.
+  # ---------------------------------------------------------------------------
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        # No BudgetName: changing a subscriber (BudgetEmail) replaces the
+        # budget, and a fixed name makes the replacement collide with the
+        # old one, so CloudFormation generates the name.
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+
+Outputs:
+  DeployRoleArn:
+    Description: Set as AWS_DEPLOY_ROLE_ARN in grapevine-com/google-analytics-mcp.
+    Value: !GetAtt DeployRole.Arn
+  TrailBucketName:
+    Description: S3 bucket receiving CloudTrail logs.
+    Value: !Ref TrailBucket

@@ -1,0 +1,127 @@
+# Manual deploy to the Grapevine AWS account: create or update
+# the ECR stack, build and push the arm64 image, then deploy the AgentCore
+# runtime stack pinned to that image.
+#
+# Prerequisites: infra/bootstrap.yaml deployed in the account (OIDC provider +
+# grapevine-ga-mcp-deploy role) and an AWS_DEPLOY_ROLE_ARN secret holding that
+# role's ARN.
+
+name: Grapevine deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      google_wif_audience:
+        description: "Optional WIF provider audience (//iam.googleapis.com/projects/.../providers/...)"
+        type: string
+        default: ""
+      google_service_account_email:
+        description: "Optional service account to impersonate (set with the audience)"
+        type: string
+        default: ""
+      google_credentials_secret_arn:
+        description: "Optional fallback: Secrets Manager ARN of a service account key"
+        type: string
+        default: ""
+      invoker_principal_arns:
+        description: "Optional comma-separated cross-account role ARNs allowed to assume the invoker role"
+        type: string
+        default: ""
+
+env:
+  AWS_REGION: us-east-1
+
+permissions:
+  id-token: write # OIDC token for assuming the deploy role
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy ECR stack
+        run: |
+          aws cloudformation deploy \
+            --template-file grapevine/ecr.yaml \
+            --stack-name grapevine-ga-mcp-ecr \
+            --no-fail-on-empty-changeset
+
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
+
+      # Looked up rather than hard-coded: this repo is public.
+      - name: Resolve ECR repository
+        run: |
+          URI=$(aws cloudformation describe-stacks --stack-name grapevine-ga-mcp-ecr \
+            --query 'Stacks[0].Outputs[?OutputKey==`RepositoryUri`].OutputValue' --output text)
+          echo "ECR_REPO=$URI" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and push arm64 image
+        run: |
+          docker buildx build --platform linux/arm64 \
+            -f grapevine/Dockerfile \
+            -t "$ECR_REPO:${{ github.sha }}" \
+            --push .
+
+      - name: Deploy runtime stack
+        env:
+          GOOGLE_WIF_AUDIENCE: ${{ inputs.google_wif_audience }}
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ inputs.google_service_account_email }}
+          GOOGLE_CREDENTIALS_SECRET_ARN: ${{ inputs.google_credentials_secret_arn }}
+          INVOKER_PRINCIPAL_ARNS: ${{ inputs.invoker_principal_arns }}
+        run: |
+          overrides=("ImageUri=$ECR_REPO:${{ github.sha }}")
+          # Passed only when set: `aws cloudformation deploy` keeps the deployed
+          # value of a parameter it isn't given, so shipping a new image never
+          # clears the Google credentials or the invoker trust by accident.
+          if [ -n "$GOOGLE_WIF_AUDIENCE" ]; then
+            overrides+=("GoogleWifAudience=$GOOGLE_WIF_AUDIENCE")
+          fi
+          if [ -n "$GOOGLE_SERVICE_ACCOUNT_EMAIL" ]; then
+            overrides+=("GoogleServiceAccountEmail=$GOOGLE_SERVICE_ACCOUNT_EMAIL")
+          fi
+          if [ -n "$GOOGLE_CREDENTIALS_SECRET_ARN" ]; then
+            overrides+=("GoogleCredentialsSecretArn=$GOOGLE_CREDENTIALS_SECRET_ARN")
+          fi
+          if [ -n "$INVOKER_PRINCIPAL_ARNS" ]; then
+            overrides+=("InvokerPrincipalArns=$INVOKER_PRINCIPAL_ARNS")
+          fi
+          aws cloudformation deploy \
+            --template-file grapevine/template.yaml \
+            --stack-name grapevine-ga-mcp \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "${overrides[@]}"
+
+      - name: Set runtime log retention
+        run: |
+          ARN=$(aws cloudformation describe-stacks --stack-name grapevine-ga-mcp \
+            --query 'Stacks[0].Outputs[?OutputKey==`AgentRuntimeArn`].OutputValue' --output text)
+          RUNTIME_ID=${ARN##*/}
+          LOG_GROUP="/aws/bedrock-agentcore/runtimes/${RUNTIME_ID}-DEFAULT"
+          if aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" \
+              --query 'logGroups[0].logGroupName' --output text | grep -q .; then
+            aws logs put-retention-policy --log-group-name "$LOG_GROUP" --retention-in-days 30
+          fi
+
+      - name: Print outputs and invocations URL
+        run: |
+          aws cloudformation describe-stacks --stack-name grapevine-ga-mcp \
+            --query 'Stacks[0].Outputs' --output table
+          ARN=$(aws cloudformation describe-stacks --stack-name grapevine-ga-mcp \
+            --query 'Stacks[0].Outputs[?OutputKey==`AgentRuntimeArn`].OutputValue' --output text)
+          ENCODED=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$ARN")
+          echo "Invocations URL:"
+          echo "https://bedrock-agentcore.$AWS_REGION.amazonaws.com/runtimes/$ENCODED/invocations?qualifier=DEFAULT"
