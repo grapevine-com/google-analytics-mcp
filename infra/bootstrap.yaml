@@ -17,6 +17,14 @@ Parameters:
     Type: String
     Default: google-analytics-mcp
     Description: Repository allowed to assume the deploy role.
+  GitHubOrgId:
+    Type: String
+    Default: "280145372"
+    Description: Numeric ID of GitHubOrg (gh api orgs/<org> --jq .id).
+  GitHubRepoId:
+    Type: String
+    Default: "1400362934"
+    Description: Numeric ID of GitHubRepo (gh api repos/<org>/<repo> --jq .id).
   ResourcePrefix:
     Type: String
     Default: grapevine-ga-mcp
@@ -74,7 +82,11 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+                # The repo uses GitHub's immutable subject format, which embeds
+                # the org and repo IDs (gh api repos/<org>/<repo>/actions/oidc/
+                # customization/sub). The plain repo:<org>/<repo>:* form never
+                # matches it. IDs also survive renames and can't be reclaimed.
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}@${GitHubOrgId}/${GitHubRepo}@${GitHubRepoId}:*
       Policies:
         - PolicyName: grapevine-ga-mcp-deploy
           PolicyDocument:
