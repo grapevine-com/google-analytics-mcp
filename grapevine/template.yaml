@@ -37,58 +37,20 @@ Conditions:
   HasInvokers: !Not [!Equals [!Join ["", !Ref InvokerPrincipalArns], ""]]
 
 Resources:
-  RuntimeRole:
-    Type: AWS::IAM::Role
+  # The execution role lives in the base (ECR) stack so IAM has propagated it
+  # long before the runtime is created; see grapevine/ecr.yaml.
+  GoogleKeySecretPolicy:
+    Type: AWS::IAM::RolePolicy
+    Condition: HasSecret
     Properties:
-      # The deploy role may only create and pass roles under this path.
-      Path: /grapevine-ga-mcp/
       RoleName: grapevine-ga-mcp-runtime
-      Description: Execution role the AgentCore Runtime assumes to run the GA MCP server.
-      AssumeRolePolicyDocument:
+      PolicyName: google-key-secret
+      PolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: bedrock-agentcore.amazonaws.com }
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals: { "aws:SourceAccount": !Ref AWS::AccountId }
-      Policies:
-        - PolicyName: runtime
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Sid: EcrAuth
-                Effect: Allow
-                Action: ecr:GetAuthorizationToken
-                Resource: "*"
-              - Sid: EcrPull
-                Effect: Allow
-                Action:
-                  - ecr:BatchGetImage
-                  - ecr:GetDownloadUrlForLayer
-                  - ecr:BatchCheckLayerAvailability
-                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/grapevine-ga-mcp
-              # No CMK on the log group: a KMS key here costs a request per
-              # write and burns the free tier.
-              - Sid: Telemetry
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                  - xray:PutTraceSegments
-                  - xray:PutTelemetryRecords
-                  - cloudwatch:PutMetricData
-                Resource: "*"
-              - !If
-                - HasSecret
-                - Sid: GoogleKeySecret
-                  Effect: Allow
-                  Action: secretsmanager:GetSecretValue
-                  Resource: !Ref GoogleCredentialsSecretArn
-                - !Ref AWS::NoValue
+            Action: secretsmanager:GetSecretValue
+            Resource: !Ref GoogleCredentialsSecretArn
 
   Runtime:
     Type: AWS::BedrockAgentCore::Runtime
@@ -99,7 +61,7 @@ Resources:
       AgentRuntimeArtifact:
         ContainerConfiguration:
           ContainerUri: !Ref ImageUri
-      RoleArn: !GetAtt RuntimeRole.Arn
+      RoleArn: !ImportValue grapevine-ga-mcp-runtime-role-arn
       # PUBLIC on purpose: the server only calls Google's public APIs, and a
       # VPC attachment can never be removed from an AgentCore runtime.
       NetworkConfiguration:

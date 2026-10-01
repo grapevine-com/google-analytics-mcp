@@ -54,6 +54,7 @@ jobs:
           aws cloudformation deploy \
             --template-file grapevine/ecr.yaml \
             --stack-name grapevine-ga-mcp-ecr \
+            --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
 
       - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2

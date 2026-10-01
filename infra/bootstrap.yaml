@@ -113,6 +113,9 @@ Resources:
                   - cloudformation:ValidateTemplate
                   - cloudformation:GetTemplateSummary
                   - cloudformation:ListStacks
+                  # The runtime stack imports the base stack's role ARN.
+                  - cloudformation:ListExports
+                  - cloudformation:ListImports
                 Resource: "*"
               # The auth token is account-wide by definition and carries no
               # write capability on its own.
