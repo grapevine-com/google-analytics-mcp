@@ -179,9 +179,9 @@ Resources:
                 Resource:
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}/*
                   - !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}*
-                Condition:
-                  StringEquals:
-                    iam:PassedToService: bedrock-agentcore.amazonaws.com
+                # No iam:PassedToService condition, matching gvc-agent's working
+                # deploy role: with it, CreateAgentRuntime fails with a bare
+                # AccessDenied. Resource scoping still limits this to our roles.
               # Create/List actions don't support resource-level scoping
               # (see gvc-agent infra/github-oidc.yaml). CreateAgentRuntime
               # implicitly creates the DEFAULT endpoint against runtime/*.
@@ -198,20 +198,10 @@ Resources:
                 Resource: "*"
               - Sid: AgentCoreScoped
                 Effect: Allow
-                Action:
-                  - bedrock-agentcore:GetAgentRuntime
-                  - bedrock-agentcore:UpdateAgentRuntime
-                  - bedrock-agentcore:DeleteAgentRuntime
-                  - bedrock-agentcore:GetAgentRuntimeEndpoint
-                  - bedrock-agentcore:UpdateAgentRuntimeEndpoint
-                  - bedrock-agentcore:DeleteAgentRuntimeEndpoint
-                  - bedrock-agentcore:InvokeAgentRuntime
-                  - bedrock-agentcore:TagResource
-                  - bedrock-agentcore:UntagResource
-                  - bedrock-agentcore:ListTagsForResource
-                  - bedrock-agentcore:GetWorkloadIdentity
-                  - bedrock-agentcore:UpdateWorkloadIdentity
-                  - bedrock-agentcore:DeleteWorkloadIdentity
+                # bedrock-agentcore:* on our runtime and workload-identity ARNs, as in
+                # gvc-agent: CreateAgentRuntime needs dependent actions an explicit
+                # list missed.
+                Action: bedrock-agentcore:*
                 Resource:
                   - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/${AgentCoreRuntimePrefix}*
                   - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/*
