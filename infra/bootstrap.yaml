@@ -196,6 +196,14 @@ Resources:
                   - bedrock-agentcore:ListAgentRuntimeVersions
                   - bedrock-agentcore:ListAgentRuntimeEndpoints
                 Resource: "*"
+              # CloudFormation tags every runtime it creates, and AgentCore
+              # authorizes tag-on-create as TagResource on runtime/* (the runtime
+              # has no ID yet), so the name-scoped statement below never matches.
+              # Without this, CreateAgentRuntime fails with a bare AccessDenied.
+              - Sid: AgentCoreTagOnCreate
+                Effect: Allow
+                Action: bedrock-agentcore:TagResource
+                Resource: !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*
               - Sid: AgentCoreScoped
                 Effect: Allow
                 # bedrock-agentcore:* on our runtime and workload-identity ARNs, as in
