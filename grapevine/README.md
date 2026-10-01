@@ -31,7 +31,7 @@ flowchart LR
   never be removed from an AgentCore runtime.
 - Inbound auth is IAM. Callers need `bedrock-agentcore:InvokeAgentRuntime` on
   the runtime. Cross-account callers (gvc-agent, still in the Bizantic account)
-  assume the `gvc-agent-ga-invoker` role created when `InvokerPrincipalArns` is
+  assume the `grapevine-ga-mcp-invoker` role created when `InvokerPrincipalArns` is
   set.
 - Upstream reports tool failures as a normal result whose text is
   `{"error": "..."}` (with `isError: false`), so clients must check for it.

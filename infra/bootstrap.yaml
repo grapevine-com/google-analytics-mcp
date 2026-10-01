@@ -152,11 +152,19 @@ Resources:
                   - iam:ListAttachedRolePolicies
                   - iam:TagRole
                   - iam:UntagRole
-                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}/*
+                # Both forms: IAM checks the path-less role/<name> ARN while a new
+                # role isn't visible yet (CloudFormation's read-back right after
+                # CreateRole) or is already gone (rollback), so path-only scoping
+                # denies those calls. Role names must start with ResourcePrefix.
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}/*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}*
               - Sid: PassExecutionRoleToAgentCore
                 Effect: Allow
                 Action: iam:PassRole
-                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}/*
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}/*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/${ResourcePrefix}*
                 Condition:
                   StringEquals:
                     iam:PassedToService: bedrock-agentcore.amazonaws.com
