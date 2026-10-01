@@ -282,7 +282,9 @@ Resources:
     Type: AWS::Budgets::Budget
     Properties:
       Budget:
-        BudgetName: grapevine-monthly
+        # No BudgetName: changing a subscriber (BudgetEmail) replaces the
+        # budget, and a fixed name makes the replacement collide with the
+        # old one, so CloudFormation generates the name.
         BudgetType: COST
         TimeUnit: MONTHLY
         BudgetLimit:
