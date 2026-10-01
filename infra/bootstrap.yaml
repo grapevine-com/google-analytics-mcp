@@ -48,6 +48,17 @@ Parameters:
     Description: Monthly cost budget in USD.
 
 Resources:
+  # AgentCore needs this service-linked role before the first runtime can be
+  # created in an account; CreateAgentRuntime fails with a bare AccessDenied
+  # without it. Owned here so the deploy role never needs
+  # iam:CreateServiceLinkedRole.
+  AgentCoreRuntimeIdentityServiceLinkedRole:
+    Type: AWS::IAM::ServiceLinkedRole
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AWSServiceName: runtime-identity.bedrock-agentcore.amazonaws.com
+
   GitHubOidcProvider:
     Type: AWS::IAM::OIDCProvider
     Properties:
@@ -102,6 +113,9 @@ Resources:
                   - cloudformation:ValidateTemplate
                   - cloudformation:GetTemplateSummary
                   - cloudformation:ListStacks
+                  # The runtime stack imports the base stack's role ARN.
+                  - cloudformation:ListExports
+                  - cloudformation:ListImports
                 Resource: "*"
               # The auth token is account-wide by definition and carries no
               # write capability on its own.
