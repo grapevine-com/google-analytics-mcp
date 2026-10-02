@@ -4,8 +4,9 @@
 
 Add a separate local stdio MCP server for one operator to read Google Analytics
 data and manage GA4 key events through Claude Desktop or Claude Code. The server
-authenticates interactively as the operator with the full `analytics.edit`
-scope. The existing read-only server and AgentCore deployment remain unchanged.
+authenticates interactively as the operator with the full `analytics.edit` scope
+plus `analytics.readonly` for Data API reports. The existing read-only server
+and AgentCore deployment remain unchanged.
 
 ## Tech Stack
 
@@ -58,9 +59,10 @@ Format with Black at 80 columns and use descriptive snake_case names.
 
 ## Boundaries
 
-- Always: Validate model-provided IDs and event names; preview exact changes;
+- Always: Request `analytics.edit` and `analytics.readonly`; validate
+  model-provided IDs and event names; preview exact changes;
   require a short-lived one-use confirmation token; keep structured local audit
-  records; request `analytics.edit`.
+  records.
 - Ask first: Add mutation categories beyond key-event management or support
   multiple users.
 - Never: Store tokens in source/config files, log tokens, mutate without a valid

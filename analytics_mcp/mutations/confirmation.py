@@ -3,6 +3,7 @@
 import platform
 import secrets
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -30,18 +31,21 @@ class PendingMutationStore:
         self.ttl_seconds = ttl_seconds
         self.clock = clock
         self._pending: dict[str, PendingMutation] = {}
+        self._lock = threading.Lock()
 
     def prepare(self, operation: str, arguments: dict) -> str:
         mutation_id = secrets.token_urlsafe(24)
-        self._pending[mutation_id] = PendingMutation(
-            operation=operation,
-            arguments=dict(arguments),
-            expires_at=self.clock() + self.ttl_seconds,
-        )
+        with self._lock:
+            self._pending[mutation_id] = PendingMutation(
+                operation=operation,
+                arguments=dict(arguments),
+                expires_at=self.clock() + self.ttl_seconds,
+            )
         return mutation_id
 
     def consume(self, mutation_id: str) -> PendingMutation:
-        mutation = self._pending.pop(mutation_id, None)
+        with self._lock:
+            mutation = self._pending.pop(mutation_id, None)
         if mutation is None:
             raise ConfirmationError(
                 "pending mutation not found or already used"

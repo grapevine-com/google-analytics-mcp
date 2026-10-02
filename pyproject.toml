@@ -44,6 +44,7 @@ issues = "https://github.com/googleanalytics/google-analytics-mcp/issues"
 
 [project.scripts]
 analytics-mcp = "analytics_mcp.server:run_server"
+analytics-mutations-mcp = "analytics_mcp.mutations.server:run_server"
 # The previous name of the script. Kept for backwards compatibility.
 google-analytics-mcp = "analytics_mcp.server:run_server"
 

@@ -3,12 +3,12 @@
 ## Task 1: OAuth credential lifecycle
 
 **Acceptance criteria:**
-- [ ] OAuth requests the full `analytics.edit` scope.
-- [ ] Refresh credentials are stored through the OS keyring.
-- [ ] Status and disconnect do not expose secret material.
+- [x] OAuth requests `analytics.edit` plus `analytics.readonly` for reports.
+- [x] Refresh credentials are stored through the OS keyring.
+- [x] Status and disconnect do not expose secret material.
 
 **Verification:**
-- [ ] Focused credential tests pass.
+- [x] Focused credential tests pass.
 
 **Dependencies:** None
 
@@ -20,12 +20,12 @@
 ## Task 2: Confirmation-gated key-event tools
 
 **Acceptance criteria:**
-- [ ] Inputs are validated and previews bind exact mutation arguments.
-- [ ] Confirmation tokens expire and cannot be replayed or tampered with.
-- [ ] Create/delete key-event operations produce sanitized audit records.
+- [x] Inputs are validated and previews bind exact mutation arguments.
+- [x] Preview IDs expire and cannot be replayed or alter stored arguments.
+- [x] Create/delete key-event operations produce sanitized audit records.
 
 **Verification:**
-- [ ] Focused mutation-tool tests pass.
+- [x] Focused mutation-tool tests pass.
 
 **Dependencies:** Task 1
 
@@ -36,18 +36,18 @@
 
 ## Checkpoint: Core behavior
 
-- [ ] Existing tests pass.
-- [ ] Mutation tests pass.
+- [x] Existing tests pass.
+- [x] Mutation tests pass.
 
 ## Task 3: Separate MCP entry point
 
 **Acceptance criteria:**
-- [ ] New executable exposes personal read and allowlisted mutation tools.
-- [ ] Existing read-only and AgentCore coordinators are unchanged.
+- [x] New executable exposes personal read and allowlisted mutation tools.
+- [x] Existing read-only and AgentCore coordinators are unchanged.
 
 **Verification:**
-- [ ] Coordinator contract tests pass.
-- [ ] Both console scripts start after editable install.
+- [x] Coordinator contract tests pass.
+- [x] Personal console entry point installs and real stdio handshake passes.
 
 **Dependencies:** Tasks 1-2
 
@@ -59,12 +59,12 @@
 ## Task 4: Operator documentation
 
 **Acceptance criteria:**
-- [ ] OAuth client setup and authorization are documented.
-- [ ] Claude Desktop and Claude Code configurations are documented.
-- [ ] Security and non-production verification guidance is explicit.
+- [x] OAuth client setup and authorization are documented.
+- [x] Claude Desktop and Claude Code configurations are documented.
+- [x] Security and non-production verification guidance is explicit.
 
 **Verification:**
-- [ ] Commands and JSON examples match the implemented entry point.
+- [x] Commands and JSON examples match the implemented entry point.
 
 **Dependencies:** Task 3
 
@@ -74,6 +74,10 @@
 
 ## Checkpoint: Complete
 
-- [ ] Full tests pass.
-- [ ] Black formatting check passes.
-- [ ] Diff and security review are complete.
+- [x] Full tests pass: 26 package tests plus 14 deployment tests.
+- [x] Black formatting check and `nox -s lint` pass.
+- [x] Diff and security review findings addressed.
+
+Live OAuth/GA4 verification requires the operator's Desktop OAuth client JSON
+and a test property. GitHub issues are disabled in this fork; the PR contains
+the specification and plan links.

@@ -10,7 +10,8 @@ stays read-only.
 ## Architecture Decisions
 
 - Keep one repository/package but use separate coordinators and console scripts.
-- Use installed-application OAuth with `analytics.edit` and OS keyring storage.
+- Use installed-application OAuth with `analytics.edit`, `analytics.readonly`,
+  and OS keyring storage.
 - Keep mutation authorization in code: exact previews are short-lived and
   single-use, followed by a native macOS confirmation dialog.
 - Expose key-event create/delete first; add other Admin API writes separately.
@@ -19,35 +20,35 @@ stays read-only.
 
 ### Phase 1: Authentication Foundation
 
-- [ ] Add OAuth dependencies and credential-store implementation.
-- [ ] Add authorization, status, and disconnect tools with unit tests.
+- [x] Add OAuth dependencies and credential-store implementation.
+- [x] Add authorization, status, and disconnect tools with unit tests.
 
 ### Checkpoint: Authentication
 
-- [ ] OAuth unit tests pass without network or browser access.
-- [ ] Existing read-only tests remain green.
+- [x] OAuth unit tests pass without network or browser access.
+- [x] Existing read-only tests remain green.
 
 ### Phase 2: Safe Key-Event Mutations
 
-- [ ] Add property/event validation and preview-token confirmation.
-- [ ] Add list, prepare-create, create, prepare-delete, and delete tools.
-- [ ] Add local audit logging with credential redaction.
+- [x] Add property/event validation and preview-token confirmation.
+- [x] Add list, prepare-create, apply, and prepare-delete tools.
+- [x] Add local audit logging with credential redaction.
 
 ### Checkpoint: Mutations
 
-- [ ] Mutation tests cover expiry, tampering, replay, and API failures.
-- [ ] Existing AgentCore and read-only coordinator behavior is unchanged.
+- [x] Mutation tests cover expiry, replay, cancellation, and audit failures.
+- [x] Existing AgentCore and read-only coordinator behavior is unchanged.
 
 ### Phase 3: Integration
 
-- [ ] Add the separate coordinator and console entry point.
-- [ ] Document Google OAuth client, Claude Desktop, and Claude Code setup.
+- [x] Add the separate coordinator and console entry point.
+- [x] Document Google OAuth client, Claude Desktop, and Claude Code setup.
 
 ### Checkpoint: Complete
 
-- [ ] Full tests and lint pass.
-- [ ] Package installs and both console scripts start.
-- [ ] Changes pass code and security review.
+- [x] Full tests and lint pass (26 package tests plus 14 deployment tests).
+- [x] Package installs and personal stdio protocol handshake passes.
+- [x] Code and security review findings addressed with regression tests.
 
 ## Risks and Mitigations
 

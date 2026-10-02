@@ -1,12 +1,16 @@
 """Personal Google OAuth credentials stored in the operating-system keyring."""
 
+import asyncio
 import json
 import os
+import threading
 from typing import Callable
 
 from analytics_mcp.tools import client as analytics_client
 
 ANALYTICS_EDIT_SCOPE = "https://www.googleapis.com/auth/analytics.edit"
+ANALYTICS_READ_SCOPE = "https://www.googleapis.com/auth/analytics.readonly"
+ANALYTICS_SCOPES = [ANALYTICS_EDIT_SCOPE, ANALYTICS_READ_SCOPE]
 _KEYRING_SERVICE = "analytics-mutations-mcp"
 _KEYRING_USERNAME = "google-oauth-credentials"
 _CLIENT_SECRETS_ENV = "GOOGLE_ANALYTICS_OAUTH_CLIENT_SECRETS"
@@ -47,7 +51,7 @@ def _flow_factory(client_secrets_file: str, scopes: list[str]):
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     return InstalledAppFlow.from_client_secrets_file(
-        client_secrets_file, scopes=scopes
+        client_secrets_file, scopes=scopes, autogenerate_code_verifier=True
     )
 
 
@@ -77,15 +81,18 @@ class CredentialManager:
         self.flow_factory = flow_factory
         self.credentials_loader = credentials_loader
         self.request_factory = request_factory
+        self._lock = threading.RLock()
 
     def authorize(self, client_secrets_file: str) -> dict:
-        flow = self.flow_factory(client_secrets_file, [ANALYTICS_EDIT_SCOPE])
+        with self._lock:
+            return self._authorize(client_secrets_file)
+
+    def _authorize(self, client_secrets_file: str) -> dict:
+        flow = self.flow_factory(client_secrets_file, ANALYTICS_SCOPES)
         credentials = flow.run_local_server(
             host="localhost",
             port=0,
-            authorization_prompt_message=(
-                "Open this URL to authorize Google Analytics access: {url}"
-            ),
+            authorization_prompt_message=None,
             success_message=(
                 "Authorization complete. You can close this browser window."
             ),
@@ -100,9 +107,13 @@ class CredentialManager:
             )
         self.store.save(credentials.to_json())
         self._activate(credentials)
-        return {"authorized": True, "scope": ANALYTICS_EDIT_SCOPE}
+        return {"authorized": True, "scopes": ANALYTICS_SCOPES}
 
     def get_credentials(self):
+        with self._lock:
+            return self._get_credentials()
+
+    def _get_credentials(self):
         serialized = self.store.load()
         if not serialized:
             raise RuntimeError(
@@ -110,7 +121,7 @@ class CredentialManager:
                 "google_analytics_authorize first"
             )
         credentials = self.credentials_loader(
-            json.loads(serialized), [ANALYTICS_EDIT_SCOPE]
+            json.loads(serialized), ANALYTICS_SCOPES
         )
         if not credentials.valid:
             if credentials.expired and credentials.refresh_token:
@@ -124,16 +135,18 @@ class CredentialManager:
         return credentials
 
     def status(self) -> dict:
-        if not self.store.load():
-            return {"authorized": False, "scope": ANALYTICS_EDIT_SCOPE}
-        self.get_credentials()
-        return {"authorized": True, "scope": ANALYTICS_EDIT_SCOPE}
+        with self._lock:
+            if not self.store.load():
+                return {"authorized": False, "scopes": ANALYTICS_SCOPES}
+            self.get_credentials()
+            return {"authorized": True, "scopes": ANALYTICS_SCOPES}
 
     def disconnect(self) -> dict:
-        self.store.delete()
-        with analytics_client._client_lock:
-            analytics_client._CREDENTIALS = None
-        return {"authorized": False}
+        with self._lock:
+            self.store.delete()
+            with analytics_client._client_lock:
+                analytics_client._CREDENTIALS = None
+            return {"authorized": False}
 
     @staticmethod
     def _activate(credentials) -> None:
@@ -160,14 +173,14 @@ async def google_analytics_authorize(
             "client_secrets_file is required unless "
             f"{_CLIENT_SECRETS_ENV} is set"
         )
-    return credential_manager.authorize(path)
+    return await asyncio.to_thread(credential_manager.authorize, path)
 
 
 async def google_analytics_auth_status() -> dict:
     """Return whether personal Google Analytics OAuth is currently usable."""
-    return credential_manager.status()
+    return await asyncio.to_thread(credential_manager.status)
 
 
 async def google_analytics_disconnect() -> dict:
     """Delete the locally stored Google OAuth credential."""
-    return credential_manager.disconnect()
+    return await asyncio.to_thread(credential_manager.disconnect)
