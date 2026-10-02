@@ -41,6 +41,17 @@ class MutationCoordinatorTest(unittest.TestCase):
                 "prepare_create_key_event",
                 "prepare_delete_key_event",
                 "apply_key_event_mutation",
+                "prepare_update_key_event",
+                "list_data_streams",
+                "list_event_create_rules",
+                "list_event_edit_rules",
+                "prepare_create_event_create_rule",
+                "prepare_update_event_create_rule",
+                "prepare_delete_event_create_rule",
+                "prepare_create_event_edit_rule",
+                "prepare_update_event_edit_rule",
+                "prepare_delete_event_edit_rule",
+                "apply_event_rule_mutation",
             },
         )
         self.assertEqual(
@@ -131,7 +142,17 @@ class MutationStdioTest(unittest.IsolatedAsyncioTestCase):
                     initialized.serverInfo.name,
                     "Google Analytics Personal Mutations MCP Server",
                 )
-                self.assertEqual(len(tools.tools), 16)
+                self.assertEqual(len(tools.tools), 27)
+                by_name = {tool.name: tool for tool in tools.tools}
+                for name in (
+                    "prepare_create_event_create_rule",
+                    "prepare_update_event_edit_rule",
+                ):
+                    schema = by_name[name].inputSchema
+                    self.assertEqual(
+                        schema["properties"]["rule"]["type"], "object"
+                    )
+                    self.assertIn("rule", schema["required"])
 
 
 if __name__ == "__main__":

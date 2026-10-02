@@ -63,6 +63,10 @@ class FakeAdminClient:
     def delete_key_event(self, request):
         self.deleted.append(request)
 
+    def update_key_event(self, request):
+        self.update_request = request
+        return request.key_event
+
 
 class KeyEventServiceTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -86,6 +90,24 @@ class KeyEventServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.client.list_request.parent, "properties/123")
         self.assertEqual(result[0]["event_name"], "purchase")
         self.assertEqual(self.credentials.calls, 1)
+
+    async def test_updates_conversion_counting_with_exact_field_mask(self):
+        prepared = await self.service.prepare_update_key_event(
+            "properties/123/keyEvents/456", "ONCE_PER_SESSION"
+        )
+        result = await self.service.apply_key_event_mutation(
+            prepared["mutation_id"]
+        )
+        self.assertEqual(result["counting_method"], "ONCE_PER_SESSION")
+        self.assertEqual(
+            list(self.client.update_request.update_mask.paths),
+            ["counting_method"],
+        )
+        self.assertIn("ONCE_PER_SESSION", self.confirmer.messages[0])
+        with self.assertRaises(ValueError):
+            await self.service.prepare_update_key_event(
+                "properties/123/keyEvents/456", "UNSPECIFIED"
+            )
 
     async def test_create_requires_preview_then_native_confirmation(self):
         prepared = await self.service.prepare_create_key_event(

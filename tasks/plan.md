@@ -64,3 +64,20 @@ stays read-only.
 
 - Live verification requires the operator's OAuth client JSON and a
   non-production GA4 property; automated tests use fakes.
+
+## Extension: Journey event-rule CRUD
+
+1. Validate nested rule payloads/resource names, snapshot previews, and test
+   create/update/delete request construction for both rule families.
+2. Reuse the confirmed mutation lifecycle with explicit personal alpha clients
+   and redacted event-rule audits. Add key-event counting-method updates.
+3. Register all tools, document rule schemas/examples, verify with fake CRUD,
+   real stdio schema validation, and read-only live discovery.
+4. Review and commit/push to the existing personal-server PR.
+
+No new dependencies or OAuth scopes. Existing tasks are complete; extension
+tasks are tracked below in `tasks/todo.md`.
+
+Extension completed: 45 tests pass, real stdio lists 27 tools, lint/dependency
+checks pass, code review approved, and live read-only event-rule discovery
+verified on both accessible properties.

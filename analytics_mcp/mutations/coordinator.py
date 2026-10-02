@@ -22,8 +22,21 @@ from analytics_mcp.mutations.tools import (
     list_key_events,
     prepare_create_key_event,
     prepare_delete_key_event,
+    prepare_update_key_event,
 )
 from analytics_mcp.mutations.execution import finish_before_cancelling
+from analytics_mcp.mutations.event_rules import (
+    list_data_streams,
+    list_event_create_rules,
+    list_event_edit_rules,
+    prepare_create_event_create_rule,
+    prepare_update_event_create_rule,
+    prepare_delete_event_create_rule,
+    prepare_create_event_edit_rule,
+    prepare_update_event_edit_rule,
+    prepare_delete_event_edit_rule,
+    apply_event_rule_mutation,
+)
 
 _AUTH_TOOLS = {
     "google_analytics_authorize",
@@ -40,6 +53,17 @@ tools = list(readonly.tools) + [
         prepare_create_key_event,
         prepare_delete_key_event,
         apply_key_event_mutation,
+        prepare_update_key_event,
+        list_data_streams,
+        list_event_create_rules,
+        list_event_edit_rules,
+        prepare_create_event_create_rule,
+        prepare_update_event_create_rule,
+        prepare_delete_event_create_rule,
+        prepare_create_event_edit_rule,
+        prepare_update_event_edit_rule,
+        prepare_delete_event_edit_rule,
+        apply_event_rule_mutation,
     )
 ]
 tool_map = {tool.name: tool for tool in tools}

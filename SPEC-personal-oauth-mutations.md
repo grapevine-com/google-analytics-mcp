@@ -81,3 +81,33 @@ Format with Black at 80 columns and use descriptive snake_case names.
 ## Open Questions
 
 - None for the initial single-user implementation.
+
+## Extension: Journey Event Rules (user requested)
+
+Objective: let Claude create, update, and delete GA4 event-create rules and
+event-edit rules for journey tracking, and update key-event counting methods.
+Use the existing personal grant and confirmation/audit boundary.
+
+Contracts:
+- `list_data_streams(property_id)`, `list_event_create_rules(parent)`, and
+  `list_event_edit_rules(parent)` discover resources.
+- `prepare_create_event_create_rule(parent, rule)` and matching update/delete
+  tools manage derived-event rules; equivalent tools manage event-edit rules.
+- `rule` uses SDK snake_case fields: destination_event/display_name,
+  event_conditions, source_copy_parameters (create rules only), and
+  parameter_mutations. Updates are partial, with explicit field masks generated
+  from supplied fields. Resource names and output-only fields cannot be patched.
+- `apply_event_rule_mutation(mutation_id)` uses the existing cancellation-safe
+  lifecycle and shows the exact stored JSON in the native confirmation dialog.
+- `prepare_update_key_event(name, counting_method)` changes counting to
+  ONCE_PER_EVENT or ONCE_PER_SESSION through `apply_key_event_mutation`.
+
+Acceptance: correct Admin v1alpha requests for both rule families; strict input
+validation and API limits; immutable nested previews; no Google mutation before
+confirmation; minimal audit records omit matching values/parameter payloads;
+all tools advertised with valid MCP schemas and real stdio verification.
+
+These operations configure processing of future collected events; they do not
+install website instrumentation, delete historical event data, reorder edit
+rules, or create saved Exploration funnels. API contracts are sourced from
+Google's eventCreateRules/eventEditRules documentation and the installed SDK.

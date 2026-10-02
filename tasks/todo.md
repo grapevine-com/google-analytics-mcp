@@ -81,3 +81,25 @@
 Live OAuth/GA4 verification requires the operator's Desktop OAuth client JSON
 and a test property. GitHub issues are disabled in this fork; the PR contains
 the specification and plan links.
+
+## Extension tasks
+
+- [x] Task 5: Event-rule validation and CRUD (event_rules.py and tests).
+  - Acceptance: both rule families support create/partial update/delete;
+    validated payloads, immutable previews, minimal audit records.
+  - Verify: focused event-rule tests; depends on completed Tasks 1-3.
+- [x] Task 6: Key-event update (tools.py and tests).
+  - Acceptance: valid counting methods only, exact update mask and confirmation.
+  - Verify: focused key-event tests; depends on completed Task 2.
+- [x] Task 7: Registry/documentation and verification (coordinator.py,
+  coordinator tests, README).
+  - Acceptance: all tools discoverable with valid schemas; examples match API;
+    real stdio handshake and full suites pass.
+  - Verify: full unittest suites, nox lint, live read-only discovery; depends
+    on Tasks 5-6. Finish with review and an atomic commit to PR #7.
+
+Extension verification: 31 package tests + 14 deployment regression tests pass;
+27 tools verified through the real MCP stdio handshake. `nox -s lint` and
+`pip check` pass. Focused code review approved the changes. Live personal-OAuth
+read calls list streams and both rule families successfully on both accessible
+properties; no live mutations executed during verification.

@@ -1,6 +1,7 @@
 """Human confirmation for model-requested Google Analytics mutations."""
 
 import platform
+import copy
 import secrets
 import subprocess
 import threading
@@ -38,7 +39,7 @@ class PendingMutationStore:
         with self._lock:
             self._pending[mutation_id] = PendingMutation(
                 operation=operation,
-                arguments=dict(arguments),
+                arguments=copy.deepcopy(arguments),
                 expires_at=self.clock() + self.ttl_seconds,
             )
         return mutation_id

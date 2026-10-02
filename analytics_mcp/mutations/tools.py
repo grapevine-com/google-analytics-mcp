@@ -1,6 +1,7 @@
 """Confirmation-gated Google Analytics key-event tools."""
 
 import asyncio
+import copy
 import json
 import os
 import re
@@ -8,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from google.analytics import admin_v1beta
+from google.protobuf.field_mask_pb2 import FieldMask
 
 from analytics_mcp.mutations.auth import credential_manager
 from analytics_mcp.mutations.execution import finish_before_cancelling
@@ -71,6 +73,8 @@ class AuditLogger:
         )
         with os.fdopen(descriptor, "a", encoding="utf-8") as audit_file:
             audit_file.write(json.dumps(record, separators=(",", ":")) + "\n")
+            audit_file.flush()
+            os.fsync(audit_file.fileno())
 
     @staticmethod
     def _safe_arguments(operation: str, arguments: dict) -> dict:
@@ -78,6 +82,12 @@ class AuditLogger:
             return {
                 "property_id": arguments["property_id"],
                 "event_name": arguments["event_name"],
+            }
+        if "event_" in operation and "rule" in operation:
+            name = arguments.get("name", arguments.get("parent"))
+            return {
+                "property_id": "/".join(name.split("/")[:2]),
+                "event_rule_resource": name,
             }
         name = arguments["name"]
         return {
@@ -139,6 +149,23 @@ class KeyEventService:
         name = self._validate_key_event_name(name)
         return self._prepare("delete_key_event", {"name": name})
 
+    async def prepare_update_key_event(
+        self, name: str, counting_method: str
+    ) -> dict:
+        """Preview changing conversion counting without renaming the event."""
+        name = self._validate_key_event_name(name)
+        if counting_method not in {"ONCE_PER_EVENT", "ONCE_PER_SESSION"}:
+            raise ValueError(
+                "counting_method must be ONCE_PER_EVENT or ONCE_PER_SESSION"
+            )
+        return self._prepare(
+            "update_key_event",
+            {
+                "name": name,
+                "counting_method": counting_method,
+            },
+        )
+
     async def apply_key_event_mutation(self, mutation_id: str) -> dict:
         """Apply a prepared mutation after a native human confirmation dialog.
 
@@ -192,7 +219,7 @@ class KeyEventService:
         return {
             "mutation_id": mutation_id,
             "expires_in_seconds": self.pending_store.ttl_seconds,
-            "preview": {"operation": operation, **arguments},
+            "preview": {"operation": operation, **copy.deepcopy(arguments)},
             "next_step": (
                 "Call apply_key_event_mutation with mutation_id. A native "
                 "macOS dialog will require the operator to confirm."
@@ -219,6 +246,18 @@ class KeyEventService:
             request = admin_v1beta.DeleteKeyEventRequest(name=arguments["name"])
             await asyncio.to_thread(client.delete_key_event, request=request)
             return {"deleted": True, "name": arguments["name"]}
+        if operation == "update_key_event":
+            request = admin_v1beta.UpdateKeyEventRequest(
+                key_event=admin_v1beta.KeyEvent(
+                    name=arguments["name"],
+                    counting_method=arguments["counting_method"],
+                ),
+                update_mask=FieldMask(paths=["counting_method"]),
+            )
+            response = await asyncio.to_thread(
+                client.update_key_event, request=request
+            )
+            return proto_to_dict(response)
         raise ValueError(f"Unsupported mutation operation: {operation}")
 
     @staticmethod
@@ -251,6 +290,8 @@ class KeyEventService:
                 f"Create key event '{arguments['event_name']}' in "
                 f"{arguments['property_id']}? Counting method: {arguments['counting_method']}"
             )
+        if operation == "update_key_event":
+            return f"Update key event {arguments['name']} counting method to {arguments['counting_method']}?"
         return f"Delete key event {arguments['name']}?"
 
 
@@ -274,6 +315,17 @@ async def prepare_create_key_event(
 async def prepare_delete_key_event(name: str) -> dict:
     """Preview deleting a key event; this does not mutate Analytics."""
     return await key_event_service.prepare_delete_key_event(name)
+
+
+async def prepare_update_key_event(name: str, counting_method: str) -> dict:
+    """Preview changing counting_method to ONCE_PER_EVENT or ONCE_PER_SESSION.
+
+    Apply using apply_key_event_mutation. Event names are immutable: rename a
+    source/derived event with event rules and mark the new name as a key event.
+    """
+    return await key_event_service.prepare_update_key_event(
+        name, counting_method
+    )
 
 
 async def apply_key_event_mutation(mutation_id: str) -> dict:
