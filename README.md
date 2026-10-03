@@ -1,5 +1,148 @@
 # Google Analytics MCP Server (Experimental)
 
+## Personal OAuth server for Claude Desktop and Claude Code
+
+The Grapevine fork also provides a separate local `analytics-mutations-mcp`
+server. It authenticates as your Google user, exposes the existing read tools,
+and supports confirmation-gated GA4 event-rule and key-event management. The
+AgentCore/read-only server continues to use its existing credentials and tools.
+
+### One-time setup on macOS
+
+1. In your Google Cloud project, enable the Analytics Admin and Data APIs.
+2. Configure the Google OAuth consent screen. For an external app in Testing,
+   add your own Google account as a test user. Testing grants can expire after
+   seven days; reauthorize when needed.
+3. Create an OAuth client of type **Desktop app**, download its JSON, and keep
+   it outside the repository, e.g. `~/.config/analytics-mcp/oauth-client.json`.
+4. Your Google account needs an appropriate GA4 property role (Editor or
+   Administrator for these mutations).
+5. Install the fork into a local virtual environment:
+
+   ```shell
+   python3 -m venv .venv
+   .venv/bin/python -m pip install -e .
+   ```
+
+The server requests full `analytics.edit` plus `analytics.readonly`, which is
+needed for Data API reporting. These scopes do not override your GA4 property
+permissions. OAuth credentials are stored in the OS keyring (macOS Keychain),
+never in Claude configuration. No service-account fallback is used by this
+entry point.
+
+### Claude Desktop
+
+Add this entry to `~/Library/Application Support/Claude/claude_desktop_config.json`
+and restart Claude Desktop. Replace both paths with absolute paths:
+
+```json
+{
+  "mcpServers": {
+    "analytics-personal": {
+      "command": "/absolute/path/to/repo/.venv/bin/analytics-mutations-mcp",
+      "env": {
+        "GOOGLE_ANALYTICS_OAUTH_CLIENT_SECRETS": "/Users/you/.config/analytics-mcp/oauth-client.json"
+      }
+    }
+  }
+}
+```
+
+### Claude Code
+
+```shell
+claude mcp add analytics-personal --scope user \
+  -e "GOOGLE_ANALYTICS_OAUTH_CLIENT_SECRETS=/Users/you/.config/analytics-mcp/oauth-client.json" \
+  -- /absolute/path/to/repo/.venv/bin/analytics-mutations-mcp
+```
+
+Ask Claude to call `google_analytics_authorize`, then complete Google's consent
+screen in your browser. Use `google_analytics_auth_status` to check access and
+`google_analytics_disconnect` to delete the local credential. Disconnect is
+local removal; revoke the app in your Google Account to revoke the Google grant.
+
+### Key-event workflow
+
+- `list_key_events(property_id)` lists current key events.
+- `prepare_create_key_event(property_id, event_name)` previews a new key event.
+- `prepare_delete_key_event(name)` previews removing a key-event designation.
+- `prepare_update_key_event(name, counting_method)` previews changing conversion
+  counting to `ONCE_PER_EVENT` or `ONCE_PER_SESSION`.
+- `apply_key_event_mutation(mutation_id)` opens a native macOS confirmation
+  dialog showing the exact change. Only clicking **Confirm** permits the write.
+
+Previews expire after five minutes and are single-use, including cancelled or
+failed operations. They do not survive server restarts. After an API timeout,
+check the current state before preparing a retry. Mutations require a local
+macOS GUI session and fail closed elsewhere. Creating a key event does not
+instrument your website, backfill historical conversions, or create saved GA4
+Explorations. Use `run_report` and `run_funnel_report` for journey analysis.
+
+Mutation outcomes are logged without tokens at
+`~/Library/Logs/analytics-mutations-mcp/audit.jsonl`. Override the path with
+`ANALYTICS_MUTATIONS_AUDIT_LOG` if needed. Validate initial changes on a
+  non-production property: authorize, list key events, prepare a test key event,
+  cancel once, confirm once, verify it in GA4, and remove it with confirmation.
+
+### Journey events: create, edit, and delete rules
+
+Use `list_data_streams(property_id)` to find the full stream resource name,
+then `list_event_create_rules(parent)` and `list_event_edit_rules(parent)` to
+inspect configuration. Rule management uses the Admin API's **v1alpha** endpoints.
+
+| Rule family | Create | Update | Delete |
+|---|---|---|---|
+| Derived events | `prepare_create_event_create_rule` | `prepare_update_event_create_rule` | `prepare_delete_event_create_rule` |
+| Modify incoming events | `prepare_create_event_edit_rule` | `prepare_update_event_edit_rule` | `prepare_delete_event_edit_rule` |
+
+All preparations return a single-use `mutation_id`. Call
+`apply_event_rule_mutation(mutation_id)` and approve the exact resource, rule
+payload, and update mask in the macOS dialog. Updates accept only changed
+fields; arrays replace the full previous array, and omitted fields stay intact.
+Deleting a rule stops its future processing; it does not erase historical data
+or automatically remove a key-event designation. Event-edit rules apply in
+processing order; new ones are appended. Neither family can modify events
+generated by an event-create rule.
+
+Example: derive a journey completion event from an existing page view:
+
+```json
+{
+  "parent": "properties/123/dataStreams/456",
+  "rule": {
+    "destination_event": "booking_completed",
+    "event_conditions": [
+      {"field": "event_name", "comparison_type": "EQUALS", "value": "page_view"},
+      {"field": "page_location", "comparison_type": "CONTAINS", "value": "/thank-you"}
+    ],
+    "source_copy_parameters": true,
+    "parameter_mutations": [
+      {"parameter": "journey_stage", "parameter_value": "completed"}
+    ]
+  }
+}
+```
+
+Pass that payload to `prepare_create_event_create_rule`, apply it, then use
+`prepare_create_key_event`/`apply_key_event_mutation` to mark `booking_completed`
+as a conversion. For modifying an incoming event, a create-event-edit-rule
+payload instead requires `display_name`, `event_conditions`, and
+`parameter_mutations`; a mutation with `parameter: "event_name"` renames matching
+incoming events. Key-event names themselves are immutable.
+
+Names and payloads use **snake_case** SDK fields. Conditions accept Google enum
+names such as `EQUALS`, `CONTAINS`, `STARTS_WITH`, `REGULAR_EXPRESSION` and their
+`_CASE_INSENSITIVE` variants; optional `negated` is boolean. Rules require 1–10
+conditions and permit up to 20 unique parameter mutations. Rule destination
+names and parameter names must be shorter than 40 characters; mutation values
+shorter than 100. Local limits additionally cap condition fields at 40 characters,
+condition values at 1024, and rule JSON at 8192 for bounded previews.
+
+These tools work with events already sent by your website/app; sending new
+browser interactions still requires instrumentation. Use `run_funnel_report`
+to analyze journey step sequences after collection. No OAuth reauthorization is
+needed when adding these tools to an already authorized personal server.
+
 [![PyPI version](https://img.shields.io/pypi/v/analytics-mcp.svg)](https://pypi.org/project/analytics-mcp/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![GitHub branch check runs](https://img.shields.io/github/check-runs/googleanalytics/google-analytics-mcp/main)](https://github.com/googleanalytics/google-analytics-mcp/actions?query=branch%3Amain++)

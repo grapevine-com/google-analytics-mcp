@@ -11,6 +11,8 @@ dependencies = [
     "google-analytics-data==0.23.0",
     "google-analytics-admin==0.30.1",
     "google-auth~=2.40",
+    "google-auth-oauthlib>=1.2.2,<2",
+    "keyring>=25.6.0,<26",
     "mcp>=1.24.0,<2",
     "google-adk>=1.29.0",
     "httpx>=0.28.1",
@@ -42,6 +44,7 @@ issues = "https://github.com/googleanalytics/google-analytics-mcp/issues"
 
 [project.scripts]
 analytics-mcp = "analytics_mcp.server:run_server"
+analytics-mutations-mcp = "analytics_mcp.mutations.server:run_server"
 # The previous name of the script. Kept for backwards compatibility.
 google-analytics-mcp = "analytics_mcp.server:run_server"
 
